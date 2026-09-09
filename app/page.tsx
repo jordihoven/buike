@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
+import Image from "next/image";
 import { Cloud, CloudRain } from "lucide-react";
 import { Area, AreaChart, XAxis } from "recharts";
 import {
@@ -304,15 +305,18 @@ export default function Home() {
           </CardContent>
         </Card>
 
-        <Card className="overflow-hidden">
+        <Card>
           <CardHeader>
             <CardTitle>Radar</CardTitle>
           </CardHeader>
-          <CardContent className="p-0">
-            <img
+          <CardContent>
+            <Image
               src={`https://image.buienradar.nl/2.0/image/animation/RadarMapRainNL?w=550&h=512&_=${radarKey}`}
               alt="Rain radar Netherlands"
-              className="w-full h-auto"
+              width={550}
+              height={512}
+              unoptimized
+              className="rounded-sm"
             />
           </CardContent>
         </Card>
