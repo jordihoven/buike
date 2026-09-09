@@ -1,69 +1,192 @@
-import Image from "next/image";
+"use client";
+
+import { useEffect, useState } from "react";
+
+interface RainDataPoint {
+  time: string;
+  mmh: number;
+}
+
+const FALLBACK_LAT = 52.3676;
+const FALLBACK_LON = 4.9041;
+
+function parseRainText(text: string): RainDataPoint[] {
+  return text
+    .trim()
+    .split("\n")
+    .map((line) => {
+      const [rawIntensity, time] = line.split("|");
+      const intensity = parseInt(rawIntensity, 10);
+      const mmh = intensity === 0 ? 0 : Math.pow(10, (intensity - 109) / 32);
+      return { time: time?.trim() ?? "", mmh };
+    })
+    .filter((d) => d.time);
+}
+
+function intensityColor(mmh: number): string {
+  if (mmh < 0.1) return "#22c55e";
+  if (mmh < 1) return "#eab308";
+  if (mmh < 5) return "#f97316";
+  return "#ef4444";
+}
+
+function maxIntensityLabel(max: number): string {
+  if (max < 0.1) return "No rain expected";
+  if (max < 1) return "Light rain";
+  if (max < 5) return "Moderate rain";
+  return "Heavy rain";
+}
+
+function RainChart({ data }: { data: RainDataPoint[] }) {
+  if (data.length === 0) return null;
+
+  const peakMmh = Math.max(...data.map((d) => d.mmh));
+  const maxMmh = Math.max(peakMmh, 0.5);
+  const peakColor = intensityColor(peakMmh);
+  const w = 600;
+  const h = 200;
+  const pad = { top: 16, bottom: 32, left: 16 };
+  const chartW = w - pad.left * 2;
+  const chartH = h - pad.top - pad.bottom;
+
+  const points = data.map((d, i) => ({
+    x: pad.left + (i / (data.length - 1)) * chartW,
+    y: pad.top + chartH - (d.mmh / maxMmh) * chartH,
+  }));
+
+  const baseline = pad.top + chartH;
+  const areaPath =
+    `M${points[0].x},${baseline}` +
+    points.map((p) => `L${p.x},${p.y}`).join("") +
+    `L${points[points.length - 1].x},${baseline}Z`;
+
+  const linePath = points.map((p, i) => `${i === 0 ? "M" : "L"}${p.x},${p.y}`).join("");
+
+  const tickIndices = [0, Math.floor(data.length / 4), Math.floor(data.length / 2), Math.floor((data.length * 3) / 4), data.length - 1];
+
+  return (
+    <div className="w-full">
+      <div className="flex items-center justify-between mb-3 px-1">
+        <span className="text-sm text-muted">{maxIntensityLabel(peakMmh)}</span>
+        {peakMmh >= 0.1 && (
+          <span className="text-sm font-semibold" style={{ color: peakColor }}>
+            {peakMmh.toFixed(1)} mm/h peak
+          </span>
+        )}
+      </div>
+      <svg viewBox={`0 0 ${w} ${h}`} className="w-full h-auto">
+        <defs>
+          <linearGradient id="rainGrad" x1="0" y1="0" x2="0" y2="1">
+            <stop offset="0%" stopColor={peakColor} stopOpacity="0.6" />
+            <stop offset="100%" stopColor={peakColor} stopOpacity="0.05" />
+          </linearGradient>
+        </defs>
+        <line
+          x1={pad.left}
+          y1={baseline}
+          x2={pad.left + chartW}
+          y2={baseline}
+          stroke="#2a2a2a"
+          strokeWidth="1"
+        />
+        <path d={areaPath} fill="url(#rainGrad)" />
+        <path d={linePath} fill="none" stroke={peakColor} strokeWidth="2.5" strokeLinejoin="round" />
+        {tickIndices.map((idx) => {
+          const p = points[idx];
+          return (
+            <text
+              key={idx}
+              x={p.x}
+              y={baseline + 20}
+              textAnchor="middle"
+              fill="#888"
+              fontSize="12"
+              fontFamily="var(--font-geist-sans), sans-serif"
+            >
+              {data[idx].time}
+            </text>
+          );
+        })}
+      </svg>
+    </div>
+  );
+}
 
 export default function Home() {
+  const [data, setData] = useState<RainDataPoint[]>([]);
+  const [location, setLocation] = useState<string>("Locating…");
+  const [error, setError] = useState<string | null>(null);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    async function fetchRain(lat: number, lon: number) {
+      const res = await fetch(`/api/rain?lat=${lat}&lon=${lon}`);
+      const text = await res.text();
+      setData(parseRainText(text));
+      setLoading(false);
+    }
+
+    async function reverseGeocode(lat: number, lon: number) {
+      try {
+        const res = await fetch(
+          `https://nominatim.openstreetmap.org/reverse?lat=${lat}&lon=${lon}&format=json&zoom=10`,
+        );
+        const json = await res.json();
+        const city =
+          json.address?.city ||
+          json.address?.town ||
+          json.address?.village ||
+          json.address?.municipality ||
+          "Unknown location";
+        setLocation(city);
+      } catch {
+        setLocation("Unknown location");
+      }
+    }
+
+    function load(lat: number, lon: number) {
+      fetchRain(lat, lon);
+      reverseGeocode(lat, lon);
+    }
+
+    if (!navigator.geolocation) {
+      setError("Geolocation not supported");
+      load(FALLBACK_LAT, FALLBACK_LON);
+      return;
+    }
+
+    navigator.geolocation.getCurrentPosition(
+      (pos) => load(pos.coords.latitude, pos.coords.longitude),
+      () => {
+        setError("Location denied, showing Amsterdam");
+        load(FALLBACK_LAT, FALLBACK_LON);
+      },
+      { timeout: 10000, maximumAge: 300000 },
+    );
+  }, []);
+
   return (
-    <div className="flex flex-col flex-1 items-center justify-center bg-zinc-50 font-sans dark:bg-black">
-      <main className="flex flex-1 w-full max-w-3xl flex-col items-center justify-between py-32 px-16 bg-white dark:bg-black sm:items-start">
-        <Image
-          className="dark:invert h-5 w-[100px]"
-          src="/next.svg"
-          alt="Next.js logo"
-          width={100}
-          height={20}
-          priority
-        />
-        <div className="flex flex-col items-center gap-6 text-center sm:items-start sm:text-left">
-          <h1 className="max-w-xs text-3xl font-semibold leading-10 tracking-tight text-black dark:text-zinc-50">
-            To get started, edit the{" "}
-            <code className="rounded bg-black/[.06] px-1.5 py-0.5 font-mono text-[0.9em] dark:bg-white/[.08]">
-              page.tsx
-            </code>{" "}
-            file.
-          </h1>
-          <p className="max-w-md text-lg leading-8 text-zinc-600 dark:text-zinc-400">
-            Looking for a starting point or more instructions? Head over to{" "}
-            <a
-              href="https://vercel.com/templates?framework=next.js&utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-              className="font-medium text-zinc-950 dark:text-zinc-50"
-            >
-              Templates
-            </a>{" "}
-            or the{" "}
-            <a
-              href="https://nextjs.org/learn?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-              className="font-medium text-zinc-950 dark:text-zinc-50"
-            >
-              Learning
-            </a>{" "}
-            center.
-          </p>
+    <div className="flex flex-col flex-1 items-center bg-background px-4 py-8">
+      <div className="w-full max-w-md">
+        <div className="mb-6">
+          <h1 className="text-2xl font-bold tracking-tight">Buike</h1>
+          <p className="text-muted text-sm mt-1">{location}</p>
+          {error && <p className="text-yellow-500 text-xs mt-1">{error}</p>}
         </div>
-        <div className="flex flex-col gap-4 text-base font-medium sm:flex-row">
-          <a
-            className="flex h-12 w-full items-center justify-center gap-2 rounded-full bg-foreground px-5 text-background transition-colors hover:bg-[#383838] dark:hover:bg-[#ccc] md:w-[158px]"
-            href="https://vercel.com/new?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-            target="_blank"
-            rel="noopener noreferrer"
-          >
-            <Image
-              className="dark:invert h-[14px] w-4"
-              src="/vercel.svg"
-              alt="Vercel logomark"
-              width={16}
-              height={14}
-            />
-            Deploy Now
-          </a>
-          <a
-            className="flex h-12 w-full items-center justify-center rounded-full border border-solid border-black/[.08] px-5 transition-colors hover:border-transparent hover:bg-black/[.04] dark:border-white/[.145] dark:hover:bg-[#1a1a1a] md:w-[158px]"
-            href="https://nextjs.org/docs?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-            target="_blank"
-            rel="noopener noreferrer"
-          >
-            Documentation
-          </a>
+
+        <div className="rounded-2xl bg-card border border-card-border p-4">
+          <h2 className="text-xs font-medium text-muted uppercase tracking-wider mb-3">
+            Precipitation — next 2 hours
+          </h2>
+          {loading ? (
+            <div className="h-48 flex items-center justify-center">
+              <div className="w-6 h-6 border-2 border-muted border-t-foreground rounded-full animate-spin" />
+            </div>
+          ) : (
+            <RainChart data={data} />
+          )}
         </div>
-      </main>
+      </div>
     </div>
   );
 }
