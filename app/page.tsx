@@ -60,14 +60,24 @@ function RainChart({ data }: { data: RainDataPoint[] }) {
     points.map((p) => `L${p.x},${p.y}`).join("") +
     `L${points[points.length - 1].x},${baseline}Z`;
 
-  const linePath = points.map((p, i) => `${i === 0 ? "M" : "L"}${p.x},${p.y}`).join("");
+  const linePath = points
+    .map((p, i) => `${i === 0 ? "M" : "L"}${p.x},${p.y}`)
+    .join("");
 
-  const tickIndices = [0, Math.floor(data.length / 4), Math.floor(data.length / 2), Math.floor((data.length * 3) / 4), data.length - 1];
+  const tickIndices = [
+    0,
+    Math.floor(data.length / 4),
+    Math.floor(data.length / 2),
+    Math.floor((data.length * 3) / 4),
+    data.length - 1,
+  ];
 
   return (
     <div className="w-full">
       <div className="flex items-center justify-between mb-3 px-1">
-        <span className="text-sm text-muted">{maxIntensityLabel(peakMmh)}</span>
+        <span className="text-sm font-semibold text-muted">
+          {maxIntensityLabel(peakMmh)}
+        </span>
         {peakMmh >= 0.1 && (
           <span className="text-sm font-semibold" style={{ color: peakColor }}>
             {peakMmh.toFixed(1)} mm/h peak
@@ -75,12 +85,6 @@ function RainChart({ data }: { data: RainDataPoint[] }) {
         )}
       </div>
       <svg viewBox={`0 0 ${w} ${h}`} className="w-full h-auto">
-        <defs>
-          <linearGradient id="rainGrad" x1="0" y1="0" x2="0" y2="1">
-            <stop offset="0%" stopColor={peakColor} stopOpacity="0.6" />
-            <stop offset="100%" stopColor={peakColor} stopOpacity="0.05" />
-          </linearGradient>
-        </defs>
         <line
           x1={pad.left}
           y1={baseline}
@@ -89,8 +93,14 @@ function RainChart({ data }: { data: RainDataPoint[] }) {
           stroke="#2a2a2a"
           strokeWidth="1"
         />
-        <path d={areaPath} fill="url(#rainGrad)" />
-        <path d={linePath} fill="none" stroke={peakColor} strokeWidth="2.5" strokeLinejoin="round" />
+        <path d={areaPath} fill="#0090FF" fillOpacity="0.15" />
+        <path
+          d={linePath}
+          fill="none"
+          stroke="#0090FF"
+          strokeWidth="2.5"
+          strokeLinejoin="round"
+        />
         {tickIndices.map((idx) => {
           const p = points[idx];
           return (
@@ -169,15 +179,11 @@ export default function Home() {
     <div className="flex flex-col flex-1 items-center bg-background px-4 py-8">
       <div className="w-full max-w-md">
         <div className="mb-6">
-          <h1 className="text-2xl font-bold tracking-tight">Buike</h1>
           <p className="text-muted text-sm mt-1">{location}</p>
           {error && <p className="text-yellow-500 text-xs mt-1">{error}</p>}
         </div>
 
         <div className="rounded-2xl bg-card border border-card-border p-4">
-          <h2 className="text-xs font-medium text-muted uppercase tracking-wider mb-3">
-            Precipitation — next 2 hours
-          </h2>
           {loading ? (
             <div className="h-48 flex items-center justify-center">
               <div className="w-6 h-6 border-2 border-muted border-t-foreground rounded-full animate-spin" />
