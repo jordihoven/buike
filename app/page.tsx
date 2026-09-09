@@ -1,6 +1,20 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
+import { Cloud, CloudRain } from "lucide-react";
+import { Area, AreaChart, XAxis } from "recharts";
+import {
+  Card,
+  CardContent,
+  CardDescription,
+  CardHeader,
+  CardTitle,
+} from "@/components/ui/card";
+import {
+  ChartContainer,
+  ChartTooltip,
+  type ChartConfig,
+} from "@/components/ui/chart";
 
 interface RainDataPoint {
   time: string;
@@ -10,6 +24,10 @@ interface RainDataPoint {
 const FALLBACK_LAT = 52.3676;
 const FALLBACK_LON = 4.9041;
 
+const chartConfig = {
+  mmh: { label: "mm/h", color: "var(--chart-1)" },
+} satisfies ChartConfig;
+
 function parseRainText(text: string): RainDataPoint[] {
   return text
     .trim()
@@ -18,7 +36,7 @@ function parseRainText(text: string): RainDataPoint[] {
       const [rawIntensity, time] = line.split("|");
       const intensity = parseInt(rawIntensity, 10);
       const mmh = intensity === 0 ? 0 : Math.pow(10, (intensity - 109) / 32);
-      return { time: time?.trim() ?? "", mmh };
+      return { time: time?.trim() ?? "", mmh: Math.round(mmh * 100) / 100 };
     })
     .filter((d) => d.time);
 }
@@ -30,96 +48,119 @@ function intensityColor(mmh: number): string {
   return "#ef4444";
 }
 
-function maxIntensityLabel(max: number): string {
-  if (max < 0.1) return "No rain expected";
-  if (max < 1) return "Light rain";
-  if (max < 5) return "Moderate rain";
-  return "Heavy rain";
+function rainSummary(data: RainDataPoint[]): string {
+  if (data.length === 0) return "";
+
+  const isRaining = data[0].mmh >= 0.1;
+  const intervalMin =
+    data.length >= 2 ? timeDiffMin(data[0].time, data[1].time) : 5;
+
+  if (isRaining) {
+    const stopsIdx = data.findIndex((d) => d.mmh < 0.1);
+    if (stopsIdx === -1) return "Rain for the next 2 hours";
+    return `Rain stops in ${stopsIdx * intervalMin} min`;
+  }
+
+  const startsIdx = data.findIndex((d) => d.mmh >= 0.1);
+  if (startsIdx === -1) return "Dry for the next 2 hours";
+  return `Rain starts in ${startsIdx * intervalMin} min`;
+}
+
+function timeDiffMin(a: string, b: string): number {
+  const [ah, am] = a.split(":").map(Number);
+  const [bh, bm] = b.split(":").map(Number);
+  return bh * 60 + bm - (ah * 60 + am) || 5;
 }
 
 function RainChart({ data }: { data: RainDataPoint[] }) {
   if (data.length === 0) return null;
 
-  const peakMmh = Math.max(...data.map((d) => d.mmh));
-  const maxMmh = Math.max(peakMmh, 0.5);
-  const peakColor = intensityColor(peakMmh);
-  const w = 600;
-  const h = 200;
-  const pad = { top: 16, bottom: 32, left: 16 };
-  const chartW = w - pad.left * 2;
-  const chartH = h - pad.top - pad.bottom;
-
-  const points = data.map((d, i) => ({
-    x: pad.left + (i / (data.length - 1)) * chartW,
-    y: pad.top + chartH - (d.mmh / maxMmh) * chartH,
-  }));
-
-  const baseline = pad.top + chartH;
-  const areaPath =
-    `M${points[0].x},${baseline}` +
-    points.map((p) => `L${p.x},${p.y}`).join("") +
-    `L${points[points.length - 1].x},${baseline}Z`;
-
-  const linePath = points
-    .map((p, i) => `${i === 0 ? "M" : "L"}${p.x},${p.y}`)
-    .join("");
-
-  const tickIndices = [
-    0,
-    Math.floor(data.length / 4),
-    Math.floor(data.length / 2),
-    Math.floor((data.length * 3) / 4),
-    data.length - 1,
-  ];
+  const tickInterval = Math.max(1, Math.floor(data.length / 5));
 
   return (
     <div className="w-full">
-      <div className="flex items-center justify-between mb-3 px-1">
-        <span className="text-sm font-semibold text-muted">
-          {maxIntensityLabel(peakMmh)}
-        </span>
-        {peakMmh >= 0.1 && (
-          <span className="text-sm font-semibold" style={{ color: peakColor }}>
-            {peakMmh.toFixed(1)} mm/h peak
-          </span>
-        )}
-      </div>
-      <svg viewBox={`0 0 ${w} ${h}`} className="w-full h-auto">
-        <line
-          x1={pad.left}
-          y1={baseline}
-          x2={pad.left + chartW}
-          y2={baseline}
-          stroke="#2a2a2a"
-          strokeWidth="1"
-        />
-        <path d={areaPath} fill="#0090FF" fillOpacity="0.15" />
-        <path
-          d={linePath}
-          fill="none"
-          stroke="#0090FF"
-          strokeWidth="2.5"
-          strokeLinejoin="round"
-        />
-        {tickIndices.map((idx) => {
-          const p = points[idx];
-          return (
-            <text
-              key={idx}
-              x={p.x}
-              y={baseline + 20}
-              textAnchor="middle"
-              fill="#888"
-              fontSize="12"
-              fontFamily="var(--font-geist-sans), sans-serif"
-            >
-              {data[idx].time}
-            </text>
-          );
-        })}
-      </svg>
+      <ChartContainer config={chartConfig} className="h-48 w-full">
+        <AreaChart
+          data={data}
+          margin={{ top: 4, right: 4, bottom: 0, left: 4 }}
+        >
+          <defs>
+            <linearGradient id="rainFill" x1="0" y1="0" x2="0" y2="1">
+              <stop offset="0%" stopColor="var(--chart-1)" stopOpacity={0.3} />
+              <stop
+                offset="100%"
+                stopColor="var(--chart-1)"
+                stopOpacity={0.05}
+              />
+            </linearGradient>
+          </defs>
+          <XAxis
+            dataKey="time"
+            tickLine={false}
+            axisLine={false}
+            interval={tickInterval}
+            tick={{ fontSize: 12, fill: "var(--muted-foreground)" }}
+          />
+          <ChartTooltip
+            content={({ active, payload }) => {
+              if (!active || !payload?.length) return null;
+              const d = payload[0].payload as RainDataPoint;
+              return (
+                <div className="rounded-lg border bg-background px-3 py-1.5 text-sm shadow-md">
+                  <p className="font-medium">{d.time}</p>
+                  <p className="text-muted-foreground">
+                    {d.mmh.toFixed(2)} mm/h
+                  </p>
+                </div>
+              );
+            }}
+          />
+          <Area
+            type="monotone"
+            dataKey="mmh"
+            stroke="var(--chart-1)"
+            strokeWidth={2}
+            fill="url(#rainFill)"
+          />
+        </AreaChart>
+      </ChartContainer>
     </div>
   );
+}
+
+function usePullToRefresh(onRefresh: () => Promise<void>) {
+  const [pulling, setPulling] = useState(false);
+  const [pullY, setPullY] = useState(0);
+  const startY = useRef(0);
+  const refreshing = useRef(false);
+  const threshold = 80;
+
+  const onTouchStart = useCallback((e: React.TouchEvent) => {
+    if (window.scrollY === 0) startY.current = e.touches[0].clientY;
+  }, []);
+
+  const onTouchMove = useCallback((e: React.TouchEvent) => {
+    if (refreshing.current || window.scrollY > 0) return;
+    const dy = e.touches[0].clientY - startY.current;
+    if (dy > 0) {
+      setPulling(true);
+      setPullY(Math.min(dy * 0.4, 120));
+    }
+  }, []);
+
+  const onTouchEnd = useCallback(async () => {
+    if (!pulling) return;
+    if (pullY >= threshold && !refreshing.current) {
+      refreshing.current = true;
+      setPullY(threshold * 0.4);
+      await onRefresh();
+      refreshing.current = false;
+    }
+    setPulling(false);
+    setPullY(0);
+  }, [pulling, pullY, onRefresh]);
+
+  return { pullY, pulling, onTouchStart, onTouchMove, onTouchEnd };
 }
 
 export default function Home() {
@@ -127,15 +168,29 @@ export default function Home() {
   const [location, setLocation] = useState<string>("Locating…");
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
+  const [refreshing, setRefreshing] = useState(false);
+  const coords = useRef<{ lat: number; lon: number } | null>(null);
+  const [radarKey, setRadarKey] = useState(0);
+
+  const fetchRain = useCallback(async (lat: number, lon: number) => {
+    const res = await fetch(`/api/rain?lat=${lat}&lon=${lon}`);
+    const text = await res.text();
+    setData(parseRainText(text));
+    setLoading(false);
+  }, []);
+
+  const refresh = useCallback(async () => {
+    const c = coords.current;
+    if (!c) return;
+    setRefreshing(true);
+    await fetchRain(c.lat, c.lon);
+    setRadarKey((k) => k + 1);
+    setRefreshing(false);
+  }, [fetchRain]);
+
+  const pull = usePullToRefresh(refresh);
 
   useEffect(() => {
-    async function fetchRain(lat: number, lon: number) {
-      const res = await fetch(`/api/rain?lat=${lat}&lon=${lon}`);
-      const text = await res.text();
-      setData(parseRainText(text));
-      setLoading(false);
-    }
-
     async function reverseGeocode(lat: number, lon: number) {
       try {
         const res = await fetch(
@@ -155,6 +210,7 @@ export default function Home() {
     }
 
     function load(lat: number, lon: number) {
+      coords.current = { lat, lon };
       fetchRain(lat, lon);
       reverseGeocode(lat, lon);
     }
@@ -173,25 +229,93 @@ export default function Home() {
       },
       { timeout: 10000, maximumAge: 300000 },
     );
-  }, []);
+  }, [fetchRain]);
 
   return (
-    <div className="flex flex-col flex-1 items-center bg-background px-4 py-8">
-      <div className="w-full max-w-md">
-        <div className="mb-6">
-          <p className="text-muted text-sm mt-1">{location}</p>
-          {error && <p className="text-yellow-500 text-xs mt-1">{error}</p>}
+    <div
+      className="flex flex-col flex-1 items-center bg-background px-4 py-8"
+      onTouchStart={pull.onTouchStart}
+      onTouchMove={pull.onTouchMove}
+      onTouchEnd={pull.onTouchEnd}
+    >
+      <div
+        className="w-full max-w-md"
+        style={{
+          transform: `translateY(${pull.pullY}px)`,
+          transition: pull.pulling ? "none" : "transform 0.3s ease",
+        }}
+      >
+        {(pull.pullY > 0 || refreshing) && (
+          <div className="flex justify-center -mt-8 mb-2">
+            <div
+              className={`w-5 h-5 border-2 border-muted border-t-foreground rounded-full ${refreshing ? "animate-spin" : ""}`}
+              style={
+                refreshing
+                  ? undefined
+                  : { transform: `rotate(${pull.pullY * 3}deg)` }
+              }
+            />
+          </div>
+        )}
+
+        <div className="w-fit mx-auto mb-5 text-center">
+          <p className="font-medium" style={{ fontSize: "1.3rem" }}>
+            {location}
+          </p>
+          <div className="flex items-center justify-center gap-1.5 mt-0.5">
+            {!loading &&
+              (data.some((d) => d.mmh >= 0.1) ? (
+                <CloudRain
+                  size={16}
+                  style={{ color: intensityColor(data[0]?.mmh ?? 0) }}
+                />
+              ) : (
+                <Cloud size={16} className="text-muted-foreground" />
+              ))}
+            <p
+              className="text-sm"
+              style={{
+                color: loading ? "#888" : intensityColor(data[0]?.mmh ?? 0),
+              }}
+            >
+              {loading ? "Loading…" : rainSummary(data)}
+            </p>
+          </div>
+          {error && <p className="text-yellow-500 text-xs mt-2">{error}</p>}
         </div>
 
-        <div className="rounded-2xl bg-card border border-card-border p-4">
-          {loading ? (
-            <div className="h-48 flex items-center justify-center">
-              <div className="w-6 h-6 border-2 border-muted border-t-foreground rounded-full animate-spin" />
-            </div>
-          ) : (
-            <RainChart data={data} />
-          )}
-        </div>
+        <Card className="mb-4">
+          <CardHeader>
+            <CardTitle>Graph</CardTitle>
+            {!loading && Math.max(...data.map((d) => d.mmh)) >= 0.1 && (
+              <CardDescription>
+                {Math.max(...data.map((d) => d.mmh)).toFixed(1)} mm/h peak
+              </CardDescription>
+            )}
+          </CardHeader>
+          <CardContent>
+            {loading ? (
+              <div className="h-48 flex items-center justify-center">
+                <div className="w-6 h-6 border-2 border-muted border-t-foreground rounded-full animate-spin" />
+              </div>
+            ) : (
+              <RainChart data={data} />
+            )}
+          </CardContent>
+        </Card>
+
+        <Card className="overflow-hidden">
+          <CardHeader>
+            <CardTitle>Radar</CardTitle>
+          </CardHeader>
+          <CardContent className="p-0">
+            <img
+              src={`https://image.buienradar.nl/2.0/image/animation/RadarMapRainNL?w=550&h=512&_=${radarKey}`}
+              alt="Rain radar Netherlands"
+              className="w-full h-auto"
+            />
+          </CardContent>
+        </Card>
       </div>
     </div>
   );
