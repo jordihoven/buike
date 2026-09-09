@@ -150,7 +150,7 @@ export default function Home() {
     }
 
     if (!navigator.geolocation) {
-      setError("Geolocation not supported");
+      queueMicrotask(() => setError("Geolocation not supported"));
       load(FALLBACK_LAT, FALLBACK_LON);
       return;
     }
